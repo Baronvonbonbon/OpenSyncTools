@@ -1,29 +1,51 @@
+# One row per referendum (Gov2/OpenGov)
 type Referendum @entity {
-  id: ID!                              # Referendum index as string
-  track: Int
-  proposer: String
-  submittedAt: Date
-  decisionStartedAt: Date
-  approvedAt: Date
-  rejectedAt: Date
-  cancelledAt: Date
-  killedAt: Date
-  decisionDeposit: BigInt
-  submissionDeposit: BigInt
-  tallyAye: BigInt
-  tallyNay: BigInt
-  tallySupport: BigInt
-  lastUpdatedAt: Date
+  id: ID!                # e.g., "<chain>-<index>"
+  index: Int!            # on-chain referendum index
+  track: String          # e.g., "SmallSpender", "BigSpender", "Root", etc.
+  origin: String         # decoded origin if you capture it
+  status: String         # latest derived status (Submitted/Deciding/Confirmed/Rejected/TimedOut/Killed/Cancelled)
+  submittedAt: BigInt    # block height
+  submittedTs: Date
+  confirmStartedAt: BigInt
+  confirmedAt: BigInt
+  rejectedAt: BigInt
+  timedOutAt: BigInt
+  cancelledAt: BigInt
+  killedAt: BigInt
+
+  # Preimage/call details (lets you tell *what* was proposed)
+  preimageHash: String
+  callModule: String     # e.g., "treasury"
+  callName: String       # e.g., "spend", "approve_proposal"
+  callArgsJson: JSON     # serialized args so you can audit later
+
+  events: [ReferendumEvent] @derivedFrom(field: "referendum")
+  linkedSpends: [TreasurySpend] @derivedFrom(field: "referendum")  # optional soft link (see below)
 }
 
+# Every on-chain Referenda event you care about
 type ReferendumEvent @entity {
-  id: ID!
-  referendumId: String
-  section: String!
-  method: String!
-  blockHeight: Int!
-  blockHash: String!
-  indexInBlock: Int!
-  ts: Date!
-  data: String
+  id: ID!                         # "<block>-<eventIdx>"
+  referendum: Referendum!
+  blockNumber: BigInt!
+  timestamp: Date
+  extrinsicHash: String
+  type: String!                   # e.g., "Submitted", "ConfirmStarted", "Confirmed", "Rejected", ...
+  detailsJson: JSON               # raw event fields if you want them
+}
+
+# Concrete treasury spend surface (money & recipient)
+type TreasurySpend @entity {
+  id: ID!                         # "<block>-<eventIdx>"
+  blockNumber: BigInt!
+  timestamp: Date
+  extrinsicHash: String
+  event: String!                  # "SpendApproved" | "Spending" | "Awarded" (runtime-dependent)
+  beneficiary: String!            # SS58 address
+  amount: BigInt!                 # planck units
+  assetId: String                 # optional if multi-asset treasury is used
+  # Linking back to governance (best-effort; see below)
+  referendum: Referendum
+  track: String
 }
