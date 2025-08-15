@@ -16,8 +16,8 @@ sudo -u postgres psql -c "CREATE USER postgres WITH PASSWORD 'postgres';"
 
 ## 3. Clone and install
 ```bash
-git clone <your_repo_url>
-cd opengov_full_mappings
+git https://github.com/Baronvonbonbon/OpenSyncTools/
+cd govquery
 npm install
 ```
 
