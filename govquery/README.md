@@ -9,7 +9,7 @@ It mirrors the environment you ended up with when the GraphQL playground was wor
 ## Quick Start
 
 ### Prereqs
-- Node.js 18+ (you used v20)
+- Node.js 18+ 
 - PostgreSQL (database: `subquery`, user: `postgres`, password: `postgres`)
 - `git`, `curl`
 
