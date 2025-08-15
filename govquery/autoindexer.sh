@@ -20,7 +20,7 @@ mkdir -p csv
 
 while true; do
   echo "==== $(date) :: starting indexer on $CHAIN (WS=$WS_ENDPOINT) ===="
-  npx --yes -p @subql/node@1.21.2 subql-node -f .     --db-postgres "$PG"     --db-schema "$SCHEMA"     --unsafe     --workers 1     --batch-size 25     --fetch-size 25     --timeout 600000     --csv-out-dir ./csv || true
+  npx --yes -p @subql/node@1.21.2 subql-node -f .     --db-postgres "$PG"     --db-schema "$SCHEMA"     --unsafe     --workers 1     --batch-size 100     --fetch-size 100     --timeout 600000     --csv-out-dir ./csv || true
   code=$?
   echo "==== $(date) :: indexer exited (code=$code) ===="
   echo "Crash detected; backing off for 60s..."
