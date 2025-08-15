@@ -1,0 +1,27 @@
+{
+  "name": "opengov-subquery",
+  "version": "1.0.1",
+  "license": "MIT",
+  "type": "commonjs",
+  "scripts": {
+    "codegen": "subql codegen",
+    "build": "subql build",
+    "dev": "npm run codegen && npm run build",
+    "index:kusama": "npx -y @subql/node@1.21.2 -f . --db-postgres \"postgresql://postgres:postgres@localhost:5432/subquery\" --db-schema opengov --unsafe --workers 1 --batch-size 25 --fetch-size 25 --timeout 600000 --csv-out-dir ./csv",
+    "index:polkadot": "CHAIN_ID=polkadot WS_ENDPOINT=wss://rpc.polkadot.io npm run index:custom",
+    "index:custom": "npx -y @subql/node@1.21.2 -f . --db-postgres \"postgresql://postgres:postgres@localhost:5432/subquery\" --db-schema opengov --unsafe --workers 1 --batch-size 25 --fetch-size 25 --timeout 600000 --csv-out-dir ./csv",
+    "query": "npx -y @subql/query@2.23.3 --playground --name opengov --port 3000",
+    "export:json": "ts-node export/export-json.ts",
+    "export:csv": "ts-node export/export-csv.ts"
+  },
+  "dependencies": {
+    "@polkadot/api": "^12.4.2"
+  },
+  "devDependencies": {
+    "@subql/cli": "6.1.3",
+    "@subql/types": "^3.14.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5",
+    "node-fetch": "^3.3.2"
+  }
+}

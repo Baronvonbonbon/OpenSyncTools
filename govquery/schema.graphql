@@ -1,0 +1,29 @@
+type Referendum @entity {
+  id: ID!                              # Referendum index as string
+  track: Int
+  proposer: String
+  submittedAt: Date
+  decisionStartedAt: Date
+  approvedAt: Date
+  rejectedAt: Date
+  cancelledAt: Date
+  killedAt: Date
+  decisionDeposit: BigInt
+  submissionDeposit: BigInt
+  tallyAye: BigInt
+  tallyNay: BigInt
+  tallySupport: BigInt
+  lastUpdatedAt: Date
+}
+
+type ReferendumEvent @entity {
+  id: ID!
+  referendumId: String
+  section: String!
+  method: String!
+  blockHeight: Int!
+  blockHash: String!
+  indexInBlock: Int!
+  ts: Date!
+  data: String
+}

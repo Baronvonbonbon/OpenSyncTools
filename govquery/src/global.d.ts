@@ -1,0 +1,1 @@
+/// <reference path="../node_modules/@subql/types/dist/global/index.d.ts" />
