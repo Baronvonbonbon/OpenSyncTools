@@ -35,6 +35,11 @@ Indexer:
 ```bash
 npx subql-node -f . --db-postgres "postgresql://postgres:postgres@localhost:5432/subquery" --db-schema opengov --unsafe
 ```
+or run autoindexer to quick & dirty try again if RPC web socket ever closes
+
+```bash
+./autoindexer.sh
+```
 GraphQL:
 ```bash
 npx @subql/query --name opengov --playground --port 3000 --pg.host=127.0.0.1 --pg.port=5432 --pg.user=postgres --pg.password=postgres --pg.database=subquery
