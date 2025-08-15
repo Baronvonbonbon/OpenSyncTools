@@ -2,8 +2,6 @@
 
 This repo is a runnable SubQuery indexer that captures **referenda pallet** events and maintains a light `Referendum` record for common lifecycle timestamps.
 
-It mirrors the environment you ended up with when the GraphQL playground was working locally.
-
 ---
 
 ## Quick Start
