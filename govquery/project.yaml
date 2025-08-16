@@ -13,9 +13,9 @@ description: "Indexes OpenGov Referenda events and basic referendum metadata"
 repository: ""
 
 network:
-  # Defaults to Kusama. You can override with CHAIN_ID and WS_ENDPOINT env vars at runtime.
   chainId: "${CHAIN_ID:-0xb0a8d493285c2df73290dfb7e61f870f17b41801197a149ca93654499ea3dafe}"
-  endpoint: "${WS_ENDPOINT:-wss://kusama-rpc.polkadot.io}"
+  endpoint: "${WS_ENDPOINT:-ws://127.0.0.1:9944}"
+
 
 dataSources:
   - kind: substrate/Runtime

@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -u
+export NODE_OPTIONS="--max-old-space-size=4096"
+
+# Load .env if present (so you can override WS_ENDPOINT/CHAIN_ID there)
+if [ -f .env ]; then
+  set -a
+  . ./.env
+  set +a
+fi
+
+# Defaults (can be overridden by your shell env or .env)
+: "${WS_ENDPOINT:=wss://kusama.rpc.subquery.network/public/ws}"
+: "${CHAIN_ID:=0xb0a8d493285c2df73290dfb7e61f870f17b41801197a149ca93654499ea3dafe}"
+
+LOG_DIR="./logs"; mkdir -p "$LOG_DIR"
+backoff=30; max_backoff=300
+
+while true; do
+  echo "==== $(date) :: starting indexer ====" | tee -a "$LOG_DIR/indexer-$(date +%Y%m%d).log"
+  echo "WS_ENDPOINT=$WS_ENDPOINT  CHAIN_ID=$CHAIN_ID" | tee -a "$LOG_DIR/indexer-$(date +%Y%m%d).log"
+
+  # subql-node reads WS_ENDPOINT/CHAIN_ID from project.yaml env vars
+  WS_ENDPOINT="$WS_ENDPOINT" CHAIN_ID="$CHAIN_ID" \
+  npx --yes -p @subql/node@1.21.2 subql-node -f . \
+    --disable-dictionary \
+    --db-postgres "postgresql://postgres:postgres@localhost:5432/subquery" \
+    --db-schema opengov \
+    --unsafe \
+    --workers 1 \
+    --batch-size 25 \
+    --fetch-size 25 \
+    --timeout 600000 \
+    --csv-out-dir ./csv 2>&1 | tee -a "$LOG_DIR/indexer-$(date +%Y%m%d).log"
+
+  rc=${PIPESTATUS[0]}
+  echo "==== $(date) :: indexer exited (code=$rc) ====" | tee -a "$LOG_DIR/indexer-$(date +%Y%m%d).log"
+  sleep "$backoff"
+  (( backoff = backoff*2 > max_backoff ? max_backoff : backoff*2 ))
+done
+

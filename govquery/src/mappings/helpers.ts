@@ -1,53 +1,54 @@
-// Lightweight helpers shared by mappings (no @subql/node import here)
 /* eslint-disable @typescript-eslint/no-explicit-any */
+export function blockHeight(evt: any): number {
+  // SubQuery ctx for old runner styles commonly expose .block?.block?.header?.number
+  const n =
+    evt?.block?.block?.header?.number ??
+    evt?.block?.header?.number ??
+    evt?.event?.blockNumber ??
+    0;
+  return typeof n?.toNumber === "function"
+    ? n.toNumber()
+    : Number(n?.toString?.() ?? n ?? 0);
+}
 
-// SubQuery injects `api` at runtime; declare so TS doesn't complain.
-declare const api: any;
+export function blockHash(evt: any): string {
+  const h =
+    evt?.block?.block?.hash ??
+    evt?.block?.hash ??
+    evt?.event?.blockHash ??
+    "";
+  return h?.toString?.() ?? String(h ?? "");
+}
 
-export function bnToString(bn: any | undefined): string | undefined {
+export function extrinsicHash(evt: any): string | undefined {
+  // Try the wrapped extrinsic hash if present
+  const hex =
+    evt?.extrinsic?.hash ??
+    evt?.event?.extrinsic?.hash ??
+    evt?.ctx?.extrinsic?.hash;
+  return hex ? hex.toString() : undefined;
+}
+
+export function safeJson(v: unknown): string {
   try {
-    if (bn == null) return undefined;
-    return typeof bn === 'string' ? bn : bn.toString();
+    return JSON.stringify(v);
   } catch {
-    return undefined;
+    try {
+      // last-resort stringify
+      return JSON.stringify(String(v));
+    } catch {
+      return "null";
+    }
   }
 }
 
-export function safeJson(input: any): any {
-  try {
-    return JSON.parse(JSON.stringify(input));
-  } catch {
-    return input;
-  }
+/** Get all events in the *same block* that belong to the treasury pallet */
+export function findTreasuryEventsInBlock(evt: any): any[] {
+  const all =
+    evt?.block?.events ??
+    evt?.ctx?.block?.events ??
+    evt?.event?.block?.events ??
+    [];
+  return all.filter((e: any) => (e?.event?.section ?? e?.section) === "treasury");
 }
 
-export function blockHeight(ctx: any): number {
-  return Number(ctx.block.block.header.number.toString());
-}
-
-export function blockHash(ctx: any): string {
-  return ctx.block.block.hash?.toString?.() ?? ctx.block.hash?.toString?.() ?? "";
-}
-
-export function extrinsicHash(ctx: any): string | undefined {
-  return ctx.extrinsic?.extrinsic?.hash?.toString?.() ?? ctx.extrinsic?.hash?.toString?.();
-}
-
-export function findTreasuryEventsInBlock(ctx: any): any[] {
-  // Return all treasury-* events from this block
-  const events: any[] = ctx.block.events ?? ctx.block.block?.events ?? [];
-  return events.filter((e: any) => {
-    const sec = e.event?.section ?? e.section;
-    return sec === "treasury";
-  });
-}
-
-export function asAccountId(value: any): string | undefined {
-  if (value == null) return undefined;
-  try {
-    // address codec available via api, but keep generic
-    return value.toString();
-  } catch {
-    return undefined;
-  }
-}

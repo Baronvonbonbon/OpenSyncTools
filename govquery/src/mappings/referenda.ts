@@ -1,10 +1,15 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { blockHeight, blockHash, extrinsicHash, findTreasuryEventsInBlock, safeJson, bnToString } from "./helpers";
+import {
+  blockHeight,
+  blockHash,
+  extrinsicHash,
+  findTreasuryEventsInBlock,
+  safeJson,
+} from "./helpers";
 import { Referendum, ReferendumEvent, TreasurySpend } from "../types";
 
 declare const api: any;
 
-// Normalize status strings
 function toStatus(method: string): string {
   const m = method.toLowerCase();
   if (m.includes("submitted")) return "Submitted";
@@ -14,39 +19,84 @@ function toStatus(method: string): string {
   if (m.includes("approved")) return "Approved";
   if (m.includes("rejected")) return "Rejected";
   if (m.includes("executed")) return "Executed";
+  if (m.includes("cancelled")) return "Cancelled";
+  if (m.includes("killed")) return "Killed";
   return method;
 }
 
 export async function handleReferendaEvent(event: any): Promise<void> {
-  const sec = event.event.section;
-  const method = event.event.method;
+  const sec = event?.event?.section;
+  const method = event?.event?.method;
   if (sec !== "referenda") return;
 
-  const id = `${blockHeight(event)}-${event.idx ?? event.event?.index ?? 0}`;
-  const height = blockHeight(event);
+  const heightNum = blockHeight(event);
+  const height = BigInt(heightNum);
   const bhash = blockHash(event);
   const exhash = extrinsicHash(event);
   const status = toStatus(method);
 
-  // Arguments differ per event, but most include ReferendumIndex as first param
-  const data = event.event.data;
-  const refIndex = data?.[0]?.toString?.() ?? data?.index?.toString?.();
-  const track = data?.track?.toString?.() ?? data?.[1]?.track?.toString?.();
-  const outcome = method === "Executed" ? (data?.[1]?.toString?.() ?? data?.[2]?.toString?.()) : undefined;
+  // Prefer real block timestamp if exposed by your runner
+  const ts =
+    event?.block?.timestamp != null
+      ? new Date(event.block.timestamp)
+      : new Date();
 
-  // Ensure main Referendum record exists
-  let r = await Referendum.get(refIndex ?? id);
+  const rawIdx = event?.idx ?? event?.event?.index ?? 0;
+  const indexInBlock =
+    typeof rawIdx?.toNumber === "function"
+      ? rawIdx.toNumber()
+      : Number(rawIdx?.toString?.() ?? rawIdx ?? 0);
+
+  const id = `${heightNum}-${indexInBlock}`;
+
+  // Extract common args
+  const data = event?.event?.data;
+  const refIndex =
+    data?.[0]?.toString?.() ??
+    data?.index?.toString?.() ??
+    data?.referendumIndex?.toString?.();
+  const trackRaw =
+    data?.track?.toString?.() ?? data?.[1]?.track?.toString?.();
+  const outcome =
+    method === "Executed"
+      ? data?.[1]?.toString?.() ?? data?.[2]?.toString?.()
+      : undefined;
+
+  // Ensure Referendum exists
+  const rId = refIndex ?? id;
+  let r = await Referendum.get(rId);
   if (!r) {
-    r = new Referendum(refIndex ?? id);
-    r.createdAt = new Date();
+    r = new Referendum(rId);
+    r.createdAt = ts;
   }
 
-  r.lastSeenAt = new Date();
+  // Best-effort on-chain enrichment on submission
+  try {
+    if (["Submitted", "SubmissionDepositPlaced"].includes(method)) {
+      const onchain = await api.query?.referenda?.referendumInfoFor?.(rId);
+      if (onchain?.isSome) {
+        const info = onchain.unwrap();
+        const track = info?.ongoing?.track?.toNumber?.();
+        if (typeof track === "number" && !Number.isNaN(track)) r.track = track;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // Update Referendum summary
+  r.status = status;
+  r.lastSeenAt = ts;
   r.lastStatus = status;
-  r.lastStatusAt = height;
-  r.track = track ?? r.track;
+  r.lastStatusAt = ts;
   r.blockHashLast = bhash;
-  r.extrinsicHashLast = exhash ?? r.extrinsicHashLast;
+  if (exhash) r.extrinsicHashLast = exhash;
+
+  const trackNum =
+    trackRaw != null && !Number.isNaN(Number(trackRaw))
+      ? Number(trackRaw)
+      : undefined;
+  if (trackNum != null) r.track = trackNum;
 
   // Event log row
   const ev = new ReferendumEvent(id);
@@ -56,47 +106,65 @@ export async function handleReferendaEvent(event: any): Promise<void> {
   ev.status = status;
   ev.blockHeight = height;
   ev.blockHash = bhash;
+  ev.indexInBlock = indexInBlock;
+  ev.ts = ts;
+  ev.data = safeJson(data?.toHuman?.() ?? data?.toJSON?.() ?? data ?? null);
+  ev.args = safeJson(data?.toHuman?.() ?? data ?? null);
   ev.extrinsicHash = exhash;
-  ev.args = safeJson(data?.toHuman?.() ?? data);
 
-  // Timestamps by status
+  // Milestone timestamps
   switch (status) {
     case "Submitted":
-      r.submittedAt = height;
+      r.submittedAt = ts;
       break;
     case "ConfirmStarted":
-      r.confirmStartedAt = height;
+      r.confirmStartedAt = ts;
       break;
     case "DecisionStarted":
-      r.decisionStartedAt = height;
+      r.decisionStartedAt = ts;
       break;
     case "Approved":
-      r.approvedAt = height;
+      r.approvedAt = ts;
       break;
     case "Rejected":
-      r.rejectedAt = height;
+      r.rejectedAt = ts;
+      break;
+    case "Cancelled":
+      r.cancelledAt = ts;
+      break;
+    case "Killed":
+      r.killedAt = ts;
       break;
     case "Executed":
-      r.executedAt = height;
+      r.executedAt = ts;
       r.executionOutcome = outcome;
-      // When the referendum executes, scan same block for treasury events and link them
+
+      // Link same-block treasury events
       for (const te of findTreasuryEventsInBlock(event)) {
-        const tmethod = te.event?.method ?? "";
-        const tid = `${height}-treasury-${te.idx ?? te.event?.index ?? 0}`;
+        const tmethod = te?.event?.method ?? "";
+        const tid = `${heightNum}-treasury-${(te?.idx ?? te?.event?.index) ?? 0}`;
+
         let spend = await TreasurySpend.get(tid);
         if (!spend) spend = new TreasurySpend(tid);
+
+        spend.referendumId = r.id;
         spend.blockHeight = height;
         spend.blockHash = bhash;
-        spend.referendumId = r.id;
         spend.eventMethod = tmethod;
-        spend.args = safeJson(te.event?.data?.toHuman?.() ?? te.event?.data);
-        spend.createdAt = spend.createdAt ?? new Date();
-        spend.updatedAt = new Date();
+        spend.extrinsicHash = extrinsicHash(te);
+        spend.args = safeJson(te?.event?.data?.toHuman?.() ?? te?.event?.data);
+        spend.createdAt = spend.createdAt ?? ts;
+        spend.updatedAt = ts;
         await spend.save();
       }
       break;
+    default:
+      break;
   }
+
+  r.lastUpdatedAt = ts;
 
   await r.save();
   await ev.save();
 }
+

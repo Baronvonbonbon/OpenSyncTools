@@ -23,9 +23,12 @@ export async function handleReferendaEvent(evt: SubstrateEvent): Promise<void> {
   entity.referendumId = extractReferendumId(event);
   entity.section = section;
   entity.method = method;
-  entity.blockHeight = block.block.header.number.toNumber();
+  entity.blockHeight = block.block.header.number.toBigInt?.()
+  ?? BigInt(block.block.header.number.toString());
   entity.blockHash = block.block.hash.toString();
-  entity.indexInBlock = event.index;
+  entity.indexInBlock = typeof (event.index as any)?.toNumber === 'function'
+  ? (event.index as any).toNumber()
+  : Number((event.index as any)?.toString?.() ?? event.index);
   entity.ts = new Date(block.timestamp ?? Date.now());
   entity.data = JSON.stringify(event.data?.toHuman?.() ?? event.data?.toJSON?.() ?? null);
   await entity.save();
