@@ -1,0 +1,34 @@
+specVersion: 1.0.0
+name: opengov-subquery
+version: 1.0.1
+runner:
+  node:
+    name: "@subql/node"
+    version: ">=1.21.0"
+  query:
+    name: "@subql/query"
+    version: ">=2.22.0"
+
+description: "Indexes OpenGov Referenda events and basic referendum metadata"
+repository: ""
+
+network:
+  chainId: "0xb0a8d493285c2df73290dfb7e61f870f17b41801197a149ca93654499ea3dafe"
+  endpoint: "wss://rpc.ibp.network/kusama"
+
+dataSources:
+  - kind: substrate/Runtime
+    startBlock: 1
+    mapping:
+      file: ./dist/index.js
+      handlers:
+        # Catch any event from the referenda pallet
+        - handler: handleReferendaEvent
+          kind: substrate/EventHandler
+          filter:
+            module: referenda
+        # Track finalized blocks for block-level metadata
+        - handler: handleBlock
+          kind: substrate/BlockHandler
+schema:
+  file: ./schema.graphql

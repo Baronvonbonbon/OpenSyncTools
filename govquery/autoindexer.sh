@@ -4,7 +4,8 @@ export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}"
 
 # --- Chain ---
 : "${CHAIN_ID:=0xb0a8d493285c2df73290dfb7e61f870f17b41801197a149ca93654499ea3dafe}"
-: "${DB_SCHEMA:=opengov_$(date +%s)}"
+: "${DB_SCHEMA:=opengov}"
+: "${ONFINALITY_KEY:=}" 
 
 # --- Probe timeouts ---
 : "${HTTP_PROBE_TIMEOUT:=6}"     # seconds
@@ -28,14 +29,29 @@ if [ -f .env ]; then
   set -a; . ./.env; set +a
 fi
 
-# Public archive RPCs in WS|HTTP form (local first!)
+onfinality_pair () {
+  [ -z "$ONFINALITY_KEY" ] && return 0
+  printf "wss://kusama.api.onfinality.io/ws?apikey=%s|https://kusama.api.onfinality.io/rpc?apikey=%s" "$ONFINALITY_KEY" "$ONFINALITY_KEY"
+}
+
 ENDPOINTS=(
   "ws://127.0.0.1:9944|http://127.0.0.1:9944"
+  # OnFinality (inserted only if key is set)
+)
+
+# If you have a key, push OnFinality near the front:
+if [ -n "$ONFINALITY_KEY" ]; then
+  ENDPOINTS+=("$(onfinality_pair)")
+fi
+
+# Other public fallbacks:
+ENDPOINTS+=(
   "wss://rpc.ibp.network/kusama|https://rpc.ibp.network/kusama"
   "wss://kusama.dotters.network|https://kusama.dotters.network"
   "wss://ksm-rpc.stakeworld.io|https://ksm-rpc.stakeworld.io"
   "wss://kusama-mainnet-rpc.itrocket.net|https://kusama-mainnet-rpc.itrocket.net"
 )
+
 
 # If user provides WS_ENDPOINT, push it to the front with a best-guess HTTP pair
 if [ -n "${WS_ENDPOINT:-}" ]; then
@@ -88,33 +104,50 @@ http_archive_check () {
   return 0
 }
 
+render_manifest() {
+  local out=".project.effective.yaml"
+  if command -v envsubst >/dev/null 2>&1; then
+    WS_ENDPOINT="$CHOSEN_WS" CHAIN_ID="$CHAIN_ID" envsubst < project.yaml > "$out"
+  else
+    sed -E \
+      -e "s|\$\{WS_ENDPOINT\}|$CHOSEN_WS|g" \
+      -e "s|\$\{CHAIN_ID\}|$CHAIN_ID|g" \
+      project.yaml > "$out"
+  fi
+  { echo ">> Using manifest:"; sed -n '/^network:/,/^dataSources:/p' "$out"; } >&2
+  printf '%s\n' "$out"
+}
+
 ws_probe () {
-  # $1 = WS endpoint
-  local ws="$1"
+  # $1 = WS endpoint, $2 = genesis hash (CHAIN_ID)
+  local ws="$1" gen="${2:-0xb0a8d493285c2df73290dfb7e61f870f17b41801197a149ca93654499ea3dafe}"
   node -e "
     const { ApiPromise, WsProvider } = require('@polkadot/api');
-    const provider = new WsProvider('$ws', 10_000);
-    const timer = setTimeout(() => { process.stderr.write('WS probe timeout\n'); process.exit(2); }, ${WS_PROBE_TIMEOUT}000);
-    ApiPromise.create({ provider }).then(async api => {
-      try { await api.rpc.system.chain(); clearTimeout(timer); process.exit(0); }
-      catch (e) { clearTimeout(timer); process.stderr.write(String(e)+'\n'); process.exit(1); }
-    }).catch(e => { clearTimeout(timer); process.stderr.write(String(e)+'\n'); process.exit(1); });
+    const ws = '$ws'; const gen = '$gen';
+    const provider = new WsProvider(ws, 10_000);
+    const timer = setTimeout(() => { process.stderr.write('WS probe timeout\\n'); process.exit(2); }, ${WS_PROBE_TIMEOUT}000);
+    (async () => {
+      const api = await ApiPromise.create({ provider });
+      try {
+        // Archive litmus via WS as well
+        await api.rpc.state.getRuntimeVersion(gen);
+        clearTimeout(timer); process.exit(0);
+      } catch (e) {
+        clearTimeout(timer); process.stderr.write(String(e)+'\\n'); process.exit(1);
+      }
+    })().catch(e => { clearTimeout(timer); process.stderr.write(String(e)+'\\n'); process.exit(1); });
   " >/dev/null 2>&1
   return $?
 }
 
 pick_working_endpoint () {
-  local tries=0 ws http
+  local tries=0 ws http gen="$CHAIN_ID"
   while [ "$tries" -lt "$MAX_PROBE_ATTEMPTS" ]; do
     for pair in "${ENDPOINTS[@]}"; do
-      if [[ "$pair" == *"|"* ]]; then
-        ws="${pair%%|*}"; http="${pair##*|}"
-      else
-        ws="$pair"; http=""
-      fi
-      echo ">> Probing RPC: WS=$ws  HTTP=${http:-<none>}" >&2
-      if http_archive_check "$http" && ws_probe "$ws"; then
-        echo "$ws|$http"; return 0
+      ws="${pair%%|*}"; http="${pair##*|}"
+      echo ">> Probing RPC: WS=$ws  HTTP=$http" >&2
+      if http_archive_check "$http" && ws_probe "$ws" "$gen"; then
+        echo "$ws"; return 0
       fi
       tries=$((tries+1))
       [ "$tries" -lt "$MAX_PROBE_ATTEMPTS" ] || break
@@ -167,9 +200,13 @@ while true; do
     echo ">> Using PUBLIC conservative settings: workers=$CHOSEN_WORKERS batch=$CHOSEN_BATCH fetch=$CHOSEN_FETCH" | tee -a "$LOG_DIR/indexer-$(date +%Y%m%d).log"
   fi
 
+  EFFECTIVE_MANIFEST="$(render_manifest)"
+
+  # start timer (guard against set -u issues if something blows up early)
   start_ts=$(date +%s)
+
   WS_ENDPOINT="$CHOSEN_WS" CHAIN_ID="$CHAIN_ID" \
-  npx --yes -p @subql/node@1.21.2 subql-node -f . \
+  npx --yes -p @subql/node@1.21.2 subql-node -f "$EFFECTIVE_MANIFEST" \
     --disable-dictionary \
     --disable-historical \
     --db-postgres "postgresql://postgres:postgres@127.0.0.1:5432/subquery" \
@@ -183,7 +220,7 @@ while true; do
 
   rc=${PIPESTATUS[0]}
   end_ts=$(date +%s)
-  ran=$(( end_ts - start_ts ))
+  ran=$(( end_ts - ${start_ts:-$end_ts} ))
 
   echo "==== $(date) :: indexer exited (code=$rc, ran ${ran}s) ====" | tee -a "$LOG_DIR/indexer-$(date +%Y%m%d).log"
 
